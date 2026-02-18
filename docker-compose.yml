@@ -1,0 +1,12 @@
+services:
+  xiaolai-train:
+    build: .
+    container_name: xiaolai-train
+    restart: unless-stopped
+    volumes:
+      - ./checkpoints:/app/checkpoints
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "3"
