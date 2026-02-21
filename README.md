@@ -67,11 +67,11 @@ RMSNorm + 组织层（org_layer，soft 意图→token 偏置）
 ### 2.1 启动模式
 
 
-| 模式              | 说明                     | 入口                       |
-| --------------- | ---------------------- | ------------------------ |
-| **interactive** | 纯对话，你输入→模型答→可反馈对错      | `python3 main.py`        |
-| **teacher**     | 完形填空预训练，奠基+造句+英文+汉字    | `./run_train.sh teacher` |
-| **correct**     | 人为主导纠错，逐 token 对错+期望答案 | `./run_train.sh correct` |
+| 模式              | 说明                     | 入口                                  |
+| --------------- | ---------------------- | ----------------------------------- |
+| **interactive** | 纯对话，你输入→模型答→可反馈对错      | `python3 main.py`                   |
+| **teacher**     | 完形填空预训练，奠基+造句+英文+汉字    | `python3 main.py --mode teacher`    |
+| **correct**     | 人为主导纠错，逐 token 对错+期望答案 | `python3 main.py --mode correct`    |
 
 
 ### 2.2 统一模型（LSTM / Transformer 整合）
@@ -103,12 +103,17 @@ python3 main.py --model checkpoints/model.npz
 - 输入 `quit` / `exit` / `q` 结束
 - 反馈格式：`1 2 0` 表示 正确/无关/错误；对错误词可输入修正词
 
-### 2.4 训练（run_train）
+### 2.4 训练
 
 ```bash
-./run_train.sh teacher   # 完形填空预训练（默认）
-./run_train.sh loop      # 循环训练（Ctrl+C 停止）
-./run_train.sh correct   # 人为主导纠错
+# 完形填空预训练
+python3 main.py --mode teacher
+
+# 循环训练（Ctrl+C 安全停止）
+python3 main.py --mode teacher --teacher-loop
+
+# 人为主导纠错
+python3 main.py --mode correct
 ```
 
 - **teacher**：语料完形填空 → 身份种子 → 29 课自动验证（奠基/对话/造句）
@@ -120,8 +125,8 @@ python3 main.py --model checkpoints/model.npz
 
 ```bash
 rm -rf checkpoints/model.npz checkpoints/model_meta.json
-./run_train.sh teacher
-./run_train.sh correct   # 可选：教身份与纠错
+python3 main.py --mode teacher
+python3 main.py --mode correct   # 可选：教身份与纠错
 ```
 
 ---
@@ -172,7 +177,6 @@ Future/
 ├── main.py                  # 入口：解析配置 → 加载模型 → 按 mode 分发
 ├── teacher.py               # 完形填空预训练（课程学习 + 预热 + 拼接序列）
 ├── corrector.py             # 人为主导纠错（编辑距离对齐）
-├── run_train.sh             # 统一训练启动脚本
 ├── requirements.txt         # 依赖：numpy, torch
 │
 ├── src/
@@ -277,11 +281,10 @@ python3 main.py --mode teacher --teacher-learning-passes 12 --teacher-replay-ste
 python3 main.py --mode correct --correct-purge-memory
 
 # 自定义模型名称和创造者名称
-python3 main.py --name 小来 --creator 随机名字
-./run_train.sh teacher  # 训练时自动使用模型中保存的名称
+python3 main.py --name 小来 --creator 某某某
 
 # 循环训练（云端持续学习，Ctrl+C 安全停止）
-./run_train.sh loop
+python3 main.py --mode teacher --teacher-loop
 ```
 
 ---

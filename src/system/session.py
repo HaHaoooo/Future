@@ -43,7 +43,7 @@ def run_interactive_session(model: NeuralAffectiveModel, config: AppConfig) -> N
 
         if not trace.tokens:
             print("模型> （空输出）")
-            print("  [提示] 若频繁空输出，可运行 ./run_train.sh teacher 进行基础对话训练")
+            print("  [提示] 若频繁空输出，可运行 python3 main.py --mode teacher 进行基础对话训练")
             print()
             continue
 
