@@ -5,6 +5,10 @@
 双编码器：LSTM（numpy） / Transformer（torch，大上下文 8K+）
 结构：嵌入 + 感官 + 情感 → [LSTM 或 Transformer] → 组织层 → logits
 功能：memory 检索、意图偏置、情感/视角/逻辑链、deliberate 生成、即时学习。
+
+LSTM 初始化优化（对齐现代最佳实践）：
+  - 遗忘门偏置 = 1.0（Jozefowicz 2015 / PyTorch 默认），初期倾向记住信息
+  - 隐→隐权重正交初始化（Saxe 2014），改善长距离梯度流
 """
 import json
 import math
@@ -45,6 +49,13 @@ EMBED_SCALE = 0.08  # 嵌入与权重初始化缩放
 
 
 # --- 激活与采样 ---
+def _np_orthogonal(rows: int, cols: int) -> np.ndarray:
+    """正交初始化 (Saxe et al. 2014)，现代 RNN 标准做法，改善梯度流。"""
+    a = np.random.randn(rows, cols).astype(np.float64)
+    u, _, vt = np.linalg.svd(a, full_matrices=False)
+    return u if rows >= cols else vt
+
+
 def _np_gelu(x: np.ndarray) -> np.ndarray:
     return 0.5 * x * (1.0 + np.tanh(_SQRT_2_PI * (x + 0.044715 * x ** 3)))
 
@@ -527,14 +538,16 @@ class NeuralAffectiveModel:
         self.lstm_Wxf = np.random.randn(inp, d).astype(np.float64) * scale
         self.lstm_Wxg = np.random.randn(inp, d).astype(np.float64) * scale
         self.lstm_Wxo = np.random.randn(inp, d).astype(np.float64) * scale
-        self.lstm_Whi = np.random.randn(d, d).astype(np.float64) * scale
-        self.lstm_Whf = np.random.randn(d, d).astype(np.float64) * scale
-        self.lstm_Whg = np.random.randn(d, d).astype(np.float64) * scale
-        self.lstm_Who = np.random.randn(d, d).astype(np.float64) * scale
-        self.lstm_bi = np.random.randn(d).astype(np.float64) * scale
-        self.lstm_bf = np.random.randn(d).astype(np.float64) * scale
-        self.lstm_bg = np.random.randn(d).astype(np.float64) * scale
-        self.lstm_bo = np.random.randn(d).astype(np.float64) * scale
+        # 正交初始化隐→隐权重 (Saxe 2014)，现代 LSTM 标配，改善长距离梯度流
+        self.lstm_Whi = _np_orthogonal(d, d) * (scale * 2.5)
+        self.lstm_Whf = _np_orthogonal(d, d) * (scale * 2.5)
+        self.lstm_Whg = _np_orthogonal(d, d) * (scale * 2.5)
+        self.lstm_Who = _np_orthogonal(d, d) * (scale * 2.5)
+        self.lstm_bi = np.zeros(d, dtype=np.float64)
+        # 遗忘门偏置=1.0 (Jozefowicz 2015 / PyTorch 默认)，让 LSTM 初期倾向「记住」
+        self.lstm_bf = np.ones(d, dtype=np.float64)
+        self.lstm_bg = np.zeros(d, dtype=np.float64)
+        self.lstm_bo = np.zeros(d, dtype=np.float64)
 
     def _init_org_layer(self) -> None:
         in_dim = 2 * self.hidden_dim

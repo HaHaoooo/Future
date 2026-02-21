@@ -1,1 +1,1 @@
-"""System modules for interactive learning runtime."""
+"""系统模块：配置解析、模型加载、会话编排、感官推断、反馈处理、界面输出。"""

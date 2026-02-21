@@ -6,16 +6,25 @@
 
 ## 一、模型架构
 
-### 1.1 整体结构（统一整合）
+### 1.1 整体结构
 
 ```
 输入 token 序列
     ↓
 嵌入层 E [vocab × hidden_dim] + 感官向量 [sensory_dim] + 情感向量 [emotion_dim]
     ↓
-[LSTM 或 Transformer]（numpy=LSTM / torch=6 层 Transformer+RoPE+8K 上下文）
-    ↓
-Scaled Dot-Product Attention（Q=最后隐态，K=V=历史隐态堆叠）
+┌─────────────────────────────────────────────────────────────────────┐
+│  LSTM（numpy 后端）                                                 │
+│    - 遗忘门偏置 = 1.0（Jozefowicz 2015），初期倾向记住信息            │
+│    - 隐→隐权重正交初始化（Saxe 2014），改善长距离梯度流               │
+│    - Scaled Dot-Product Attention（Q=最后隐态，K=V=历史隐态堆叠）    │
+├─────────────────────────────────────────────────────────────────────┤
+│  Transformer（torch 后端，对齐 LLaMA / Mistral / Gemma 架构）       │
+│    - RMSNorm 替代 LayerNorm（更高效，收敛更快）                      │
+│    - SwiGLU FFN 替代 GELU FFN（门控激活，语言建模效果更优）           │
+│    - RoPE 旋转位置编码（支持 8K+ 长上下文外推）                      │
+│    - Flash Attention（PyTorch 2.0+ 自动启用）                       │
+└─────────────────────────────────────────────────────────────────────┘
     ↓
 RMSNorm + 组织层（org_layer，soft 意图→token 偏置）
     ↓
@@ -31,8 +40,9 @@ RMSNorm + 组织层（org_layer，soft 意图→token 偏置）
 
 | 模块                    | 说明                                                   |
 | --------------------- | ---------------------------------------------------- |
-| **LSTM**              | 单层，输入 = 嵌入 + 感官 + 情感拼接                               |
-| **Attention**         | scaled dot-product，最后隐态 attend 历史隐态                  |
+| **LSTM**              | 单层，输入 = 嵌入 + 感官 + 情感拼接；遗忘门偏置=1.0 + 正交初始化             |
+| **Transformer**       | Pre-Norm，RMSNorm + SwiGLU + RoPE + Flash Attention   |
+| **Attention**         | LSTM 模式：scaled dot-product，最后隐态 attend 历史隐态          |
 | **组织层**               | 意图→目标 token 的软偏置，不覆盖情感与身份                            |
 | **FuzzyEmotionCore**  | 三维内在状态，decay + 多源影响（感官/推理/学习）                        |
 | **PerspectiveCore**   | 视角偏置（第一人称存在感、双字关键词）                                  |
@@ -60,7 +70,7 @@ RMSNorm + 组织层（org_layer，soft 意图→token 偏置）
 | 模式              | 说明                     | 入口                       |
 | --------------- | ---------------------- | ------------------------ |
 | **interactive** | 纯对话，你输入→模型答→可反馈对错      | `python3 main.py`        |
-| **teacher**     | 完形填空预训练，奠基+四域+造句       | `./run_train.sh teacher` |
+| **teacher**     | 完形填空预训练，奠基+造句+英文+汉字    | `./run_train.sh teacher` |
 | **correct**     | 人为主导纠错，逐 token 对错+期望答案 | `./run_train.sh correct` |
 
 
@@ -68,10 +78,12 @@ RMSNorm + 组织层（org_layer，soft 意图→token 偏置）
 
 **NeuralAffectiveModel** 单一类，按 `--backend` 选择编码器：
 
-| 后端    | 说明                   | 启动方式              |
-| ----- | -------------------- | ----------------- |
-| numpy | LSTM，纯 NumPy           | `--backend numpy` |
-| torch | Transformer，8K+ 上下文    | `--backend torch` |
+
+| 后端    | 说明                           | 启动方式              |
+| ----- | ---------------------------- | ----------------- |
+| numpy | LSTM，遗忘门偏置=1.0 + 正交初始化       | `--backend numpy` |
+| torch | Transformer，RMSNorm + SwiGLU | `--backend torch` |
+
 
 ```bash
 # Transformer（高性能 + 强逻辑）
@@ -95,10 +107,11 @@ python3 main.py --model checkpoints/data.npz
 
 ```bash
 ./run_train.sh teacher   # 完形填空预训练（默认）
+./run_train.sh loop      # 循环训练（Ctrl+C 停止）
 ./run_train.sh correct   # 人为主导纠错
 ```
 
-- **teacher**：语料完形填空 → 身份种子 → 33 课自动验证（奠基/四域/造句）
+- **teacher**：语料完形填空 → 身份种子 → 29 课自动验证（奠基/对话/造句）
 - **correct**：输入问题 → 模型答 → 你给期望答案 → 编辑距离对齐 → 纠错学习
 
 **correct 若出现「吐知识」**：模型曾被灌输大量知识导致 memory 塞满旧链条。correct 模式已关闭 replay；若仍无效，可加 `--correct-purge-memory` 清空 memory（会丢失历史经验）。
@@ -106,7 +119,7 @@ python3 main.py --model checkpoints/data.npz
 ### 2.5 从头开始
 
 ```bash
-rm -rf checkpoints/data.npz
+rm -rf checkpoints/xiaolai.npz checkpoints/xiaolai_meta.json
 ./run_train.sh teacher
 ./run_train.sh correct   # 可选：教身份与纠错
 ```
@@ -118,12 +131,24 @@ rm -rf checkpoints/data.npz
 ### 3.1 teacher.py（完形填空预训练）
 
 ```
-_run_cloze()            # context→下一词，逐词 train_one
+_run_cloze()            # 完形填空，含课程学习 + 学习率预热 + 拼接序列训练
 seed_xiaolai_logic()    # 身份/问候/因果逻辑链植入
 _run_auto_validation()  # 每课 提问→答→判断→纠错→强化，未达标不停止
 ```
 
-**课程**：奠基 9 课 + 四域 4 课 + 造句 20 课。语料 = `_PRETRAIN` + 课程 explanation / question-answer。
+**预训练策略**（对齐 GPT / LLaMA 预训练经验）：
+
+
+| 策略         | 说明                           |
+| ---------- | ---------------------------- |
+| **课程学习**   | 首轮按句长由短到长排序，让模型先掌握基础模式再学复杂结构 |
+| **学习率预热**  | 前 100 步线性从 0.1× 升至 1×，稳定早期训练 |
+| **拼接序列训练** | 随机拼接相邻 2-3 句构成长序列，学习跨句上下文    |
+
+
+**语料**：`_PRETRAIN` 常识句 + 课程 explanation / Q-A + 常用汉字 3500 + 英文 google-10000。
+
+**课程**：奠基 9 课 + 对话 3 课 + 造句 17 课 = 29 课自动验证。
 
 ### 3.2 corrector.py（人为主导纠错）
 
@@ -140,9 +165,51 @@ run_correct_session()            # 交互：输入问题→模型答→你给期
 
 ---
 
-## 四、可用配置
+## 四、项目结构
 
-### 4.1 通用
+```
+Future/
+├── main.py                  # 入口：解析配置 → 加载模型 → 按 mode 分发
+├── teacher.py               # 完形填空预训练（课程学习 + 预热 + 拼接序列）
+├── corrector.py             # 人为主导纠错（编辑距离对齐）
+├── run_train.sh             # 统一训练启动脚本
+├── requirements.txt         # 依赖：numpy, torch
+│
+├── src/
+│   ├── neural_model.py      # 核心模型（LSTM / Transformer 双编码器）
+│   ├── transformer_core.py  # Transformer 核心（RMSNorm + SwiGLU + RoPE）
+│   ├── affective.py         # 情感模块（三维模糊向量）
+│   ├── perspective.py       # 视角模块（第一人称存在感）
+│   ├── sensory.py           # 感官模块（外部数据向量化）
+│   ├── agent.py             # 智慧体属性（工作记忆、自我评估）
+│   ├── agent_pipeline.py    # 推理流水线（感知→理解→情感→回忆→生成）
+│   ├── trace_builder.py     # Trace 构建工具
+│   ├── utils.py             # 公共工具函数
+│   └── system/
+│       ├── config.py        # 命令行参数解析
+│       ├── config_types.py  # 配置数据类型
+│       ├── runtime.py       # 系统启动流程
+│       ├── model_service.py # 模型加载与初始化
+│       ├── session.py       # 交互会话编排
+│       ├── sensory_io.py    # 会话期感官推断
+│       ├── feedback.py      # 反馈解析与收集
+│       └── ui.py            # 界面输出格式化
+│
+├── lib/
+│   └── google-10000-english-no-swears.txt  # 英文词表
+│
+├── checkpoints/             # 模型存档目录
+├── Dockerfile               # Docker 构建
+├── docker-compose.yml       # Docker Compose 编排
+├── deploy.sh                # 云端一键部署脚本
+└── OPERATION.md             # 云端训练运维手册
+```
+
+---
+
+## 五、可用配置
+
+### 5.1 通用
 
 
 | 参数                     | 类型    | 默认                     | 说明                |
@@ -165,7 +232,7 @@ run_correct_session()            # 交互：输入问题→模型答→你给期
 | `--show-thought`       | flag  | False                  | 显示思考评分报告          |
 
 
-### 4.2 模式
+### 5.2 模式
 
 
 | 参数       | 类型  | 默认          | 说明                                    |
@@ -173,7 +240,7 @@ run_correct_session()            # 交互：输入问题→模型答→你给期
 | `--mode` | str | interactive | `interactive` / `teacher` / `correct` |
 
 
-### 4.3 teacher
+### 5.3 teacher
 
 
 | 参数                          | 类型   | 默认    | 说明        |
@@ -182,13 +249,12 @@ run_correct_session()            # 交互：输入问题→模型答→你给期
 | `--teacher-log-every`       | int  | 50    | 每 N 课打印进度 |
 | `--teacher-learning-passes` | int  | 8     | 每课学习次数    |
 | `--teacher-replay-steps`    | int  | 160   | 每课回放步数    |
-| `--teacher-user-facts`      | str  | ""    | 用         |
-| `--teacher-user-facts-file` | str  | ""    | 事实文件路径    |
+| `--teacher-loop`            | flag | False | 循环训练模式    |
 | `--no-teacher-chat`         | flag | False | 关闭课间对话    |
 | `--teacher-chat-max-turns`  | int  | 2     | 课间对话最大轮次  |
 
 
-### 4.4 correct
+### 5.4 correct
 
 
 | 参数                       | 类型   | 默认    | 说明           |
@@ -196,7 +262,7 @@ run_correct_session()            # 交互：输入问题→模型答→你给期
 | `--correct-purge-memory` | flag | False | 启动时清空 memory |
 
 
-### 4.5 示例
+### 5.5 示例
 
 ```bash
 # 交互式，强学习
@@ -207,13 +273,16 @@ python3 main.py --mode teacher --teacher-learning-passes 12 --teacher-replay-ste
 
 # correct 清空 memory（慎用）
 python3 main.py --mode correct --correct-purge-memory
+
+# 循环训练（云端持续学习，Ctrl+C 安全停止）
+./run_train.sh loop
 ```
 
 ---
 
-## 五、依赖
+## 六、依赖
 
 ```bash
-pip install -r requirements.txt  # numpy
+pip install -r requirements.txt  # numpy, torch
 ```
 

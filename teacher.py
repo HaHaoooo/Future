@@ -1,8 +1,13 @@
 """
 外置老师：完形填空式预训练
 
-奠基 + 四域 + 造句 + 英文语料，统一教学模式，无 API 依赖。
+奠基 + 四域 + 造句 + 英文语料 + 常用汉字，统一教学模式，无 API 依赖。
 流程：完形填空语料 → 身份种子 → 自动验证。
+
+预训练策略优化（对齐 GPT / LLaMA 预训练经验）：
+  - 课程学习（Curriculum Learning）：首轮按句长由短到长，先学基础模式
+  - 学习率线性预热（Warmup）：前 100 步从 0.1× 升至 1×，稳定早期训练
+  - 拼接序列训练：随机拼接相邻句子，学习跨句上下文
 """
 import os
 import random
@@ -443,6 +448,9 @@ def _judge_sentence_grammar(predicted: str, question: str, reference: str) -> bo
 # =============================================================================
 
 
+_CLOZE_WARMUP_STEPS = 100  # 前 100 步线性预热，避免初期大步更新破坏嵌入
+
+
 def _run_cloze(
     model: NeuralAffectiveModel,
     corpus: List[str],
@@ -450,16 +458,46 @@ def _run_cloze(
     passes_per_pair: int = 1,
     lr_scale: float = 1.2,
 ) -> int:
-    """完形填空即学：高学习率、单遍，减少无效重复。句末训练 EOS 让模型学会停止。"""
+    """
+    完形填空即学（优化版）：
+    ① 课程学习 —— 首轮按句长由短到长，让模型先掌握基础模式再学复杂结构；
+    ② 学习率预热 —— 前 100 步线性从 0.1× 升至 1×，稳定早期训练；
+    ③ 拼接序列 —— 随机拼接相邻句子，学习跨句上下文（模拟 GPT 预训练长文本）；
+    ④ 句末 EOS 训练不变。
+    """
     bos_id = model.token_to_id[model.BOS]
     eos_id = model.token_to_id[model.EOS]
     neutral_s = [0.0] * model.sensory_dim
     neutral_e = [0.0] * model.emotion_dim
     total = 0
     corpus = list(corpus)
+
+    # ---------- 拼接序列语料（随机取相邻 2-3 句拼成长序列）----------
+    rng = random.Random(42)
+    concat_corpus: List[str] = []
+    indices = list(range(len(corpus)))
+    rng.shuffle(indices)
+    i = 0
+    while i < len(indices) - 1:
+        span = rng.randint(2, min(3, len(indices) - i))
+        combined = " ".join(corpus[indices[i + j]] for j in range(span))
+        concat_corpus.append(combined)
+        i += span
+
     for ep in range(epochs):
-        random.shuffle(corpus)
-        for s in corpus:
+        if ep == 0:
+            # 课程学习：首轮按句长排序（短→长），让模型先学简单模式
+            work = sorted(corpus, key=len)
+        else:
+            random.shuffle(corpus)
+            work = corpus
+
+        # 第二轮起追加拼接序列，强化跨句理解
+        if ep >= 1:
+            random.shuffle(concat_corpus)
+            work = work + concat_corpus
+
+        for s in work:
             tokens = model.tokenize(s)
             for t in tokens:
                 model.ensure_token(t)
@@ -467,14 +505,20 @@ def _run_cloze(
                 continue
             ids = [model.token_to_id[t] for t in tokens]
             for i in range(len(ids) - 1):
+                # 学习率预热：前 _CLOZE_WARMUP_STEPS 步线性升温
+                if total < _CLOZE_WARMUP_STEPS:
+                    warmup_mult = 0.1 + 0.9 * (total / _CLOZE_WARMUP_STEPS)
+                else:
+                    warmup_mult = 1.0
+                effective_lr = model.lr * lr_scale * warmup_mult
+
                 for _ in range(passes_per_pair):
                     model.train_one(
                         [bos_id] + ids[: i + 1], ids[i + 1],
                         sensory_vec=neutral_s, emotion_vec=neutral_e,
-                        lr=model.lr * lr_scale,
+                        lr=effective_lr,
                     )
                     total += 1
-            # 句末训练 EOS：让模型学会在句子结束时停止
             for _ in range(passes_per_pair):
                 model.train_one(
                     [bos_id] + ids, eos_id,
@@ -570,23 +614,27 @@ def _run_one_cycle(
     lessons: List[TeachLesson],
     cycle: int,
 ) -> None:
-    """执行一轮完整的训练周期。"""
+    """执行一轮训练周期。cycle=0 为首次完整训练，cycle>=2 跳过完形填空只做强化验证。"""
     tag = f"[cycle {cycle}]" if cycle > 0 else "[teacher]"
+    full_train = cycle <= 1
 
-    print(f"{tag} 第一步：中文完形填空…")
-    _run_cloze(model, corpus, epochs=2, passes_per_pair=1)
+    if full_train:
+        print(f"{tag} 第一步：中文完形填空…")
+        _run_cloze(model, corpus, epochs=2, passes_per_pair=1)
 
-    if hanzi_corpus:
-        print(f"{tag} 第二步：常用汉字语料学习…")
-        _run_cloze(model, hanzi_corpus, epochs=1, passes_per_pair=1, lr_scale=1.0)
+        if hanzi_corpus:
+            print(f"{tag} 第二步：常用汉字语料学习…")
+            _run_cloze(model, hanzi_corpus, epochs=1, passes_per_pair=1, lr_scale=1.0)
 
-    if en_corpus:
-        print(f"{tag} 第三步：英文语料学习…")
-        _run_cloze(model, en_corpus, epochs=1, passes_per_pair=1, lr_scale=1.0)
+        if en_corpus:
+            print(f"{tag} 第三步：英文语料学习…")
+            _run_cloze(model, en_corpus, epochs=1, passes_per_pair=1, lr_scale=1.0)
+    else:
+        print(f"{tag} 跳过完形填空（已学过），直接进入强化阶段")
 
-    print(f"{tag} 第四步：身份种子…")
+    print(f"{tag} 身份种子…")
     model.seed_xiaolai_logic(passes_per_step=2, epochs=1)
-    print(f"{tag} 第五步：自动化验证…")
+    print(f"{tag} 自动化验证…")
     _run_auto_validation(model, config, lessons)
     model.save(config.model_path)
     print(f"\n{tag} 完成。模型已保存: {config.model_path}")

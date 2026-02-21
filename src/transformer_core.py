@@ -2,7 +2,11 @@
 """
 Transformer 核心：因果自注意力 + RoPE + Pre-Norm
 
-极致优化：Flash Attention、RoPE 长上下文、逻辑偏置融合。
+架构对齐 LLaMA / Mistral / Gemma：
+  - RMSNorm 替代 LayerNorm（更高效，收敛更快）
+  - SwiGLU FFN 替代 GELU FFN（门控激活，语言建模效果更优）
+  - RoPE 旋转位置编码（支持长上下文外推）
+  - Flash Attention（PyTorch 2.0+ 自动启用）
 """
 import math
 from typing import Optional
@@ -41,6 +45,32 @@ def apply_rope(q: torch.Tensor, k: torch.Tensor, seq_len: int) -> tuple:
     return q_rot, k_rot
 
 
+class RMSNorm(nn.Module):
+    """RMSNorm (LLaMA/Gemma 风格)：比 LayerNorm 更高效，收敛更快。"""
+
+    def __init__(self, dim: int, eps: float = 1e-6):
+        super().__init__()
+        self.weight = nn.Parameter(torch.ones(dim))
+        self.eps = eps
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        rms = torch.sqrt(torch.mean(x ** 2, dim=-1, keepdim=True) + self.eps)
+        return x / rms * self.weight
+
+
+class SwiGLU(nn.Module):
+    """SwiGLU FFN (LLaMA/Mistral/Gemma 标配)：门控激活，语言建模效果优于 GELU FFN。"""
+
+    def __init__(self, dim: int, ffn_dim: int):
+        super().__init__()
+        self.gate = nn.Linear(dim, ffn_dim, bias=False)
+        self.up = nn.Linear(dim, ffn_dim, bias=False)
+        self.down = nn.Linear(ffn_dim, dim, bias=False)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.down(F.silu(self.gate(x)) * self.up(x))
+
+
 class CausalSelfAttention(nn.Module):
     """因果多头自注意力 + RoPE，支持 Flash Attention。"""
 
@@ -73,19 +103,16 @@ class CausalSelfAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    """Pre-Norm Transformer 块：LN → Attn → residual, LN → FFN → residual。"""
+    """Pre-Norm Transformer 块：RMSNorm → Attn → residual, RMSNorm → SwiGLU → residual。"""
 
     def __init__(self, dim: int, num_heads: int, ffn_mult: int = 4, dropout: float = 0.0):
         super().__init__()
-        self.ln1 = nn.LayerNorm(dim)
+        self.ln1 = RMSNorm(dim)
         self.attn = CausalSelfAttention(dim, num_heads, dropout=dropout)
-        self.ln2 = nn.LayerNorm(dim)
-        ffn_dim = dim * ffn_mult
-        self.ffn = nn.Sequential(
-            nn.Linear(dim, ffn_dim),
-            nn.GELU(),
-            nn.Linear(ffn_dim, dim),
-        )
+        self.ln2 = RMSNorm(dim)
+        # SwiGLU 有 3 个矩阵，按 2/3 缩放保持参数量一致
+        swiglu_dim = int(dim * ffn_mult * 2 / 3)
+        self.ffn = SwiGLU(dim, swiglu_dim)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = x + self.attn(self.ln1(x))
@@ -121,7 +148,7 @@ class XiaolaiTransformer(nn.Module):
             TransformerBlock(hidden_dim, num_heads, ffn_mult=4, dropout=dropout)
             for _ in range(num_layers)
         ])
-        self.ln_f = nn.LayerNorm(hidden_dim)
+        self.ln_f = RMSNorm(hidden_dim)
         self.max_seq_len = max_seq_len
         self._init_weights()
 
@@ -133,9 +160,8 @@ class XiaolaiTransformer(nn.Module):
                     nn.init.zeros_(m.bias)
             elif isinstance(m, nn.Embedding):
                 nn.init.normal_(m.weight, std=0.02)
-            elif isinstance(m, nn.LayerNorm):
+            elif isinstance(m, RMSNorm):
                 nn.init.ones_(m.weight)
-                nn.init.zeros_(m.bias)
 
     def forward(
         self,

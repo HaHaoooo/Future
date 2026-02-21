@@ -1,3 +1,9 @@
+"""
+反馈解析
+
+交互对话中逐 token 反馈的输入解析与收集。
+支持 1/0/2（对/错/无关）及多种同义词。
+"""
 from typing import List, Optional, Sequence, Tuple
 
 
