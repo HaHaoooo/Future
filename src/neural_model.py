@@ -34,7 +34,7 @@ from src.perspective import PerspectiveCore, FIRST_PERSON_TOKENS
 from src.sensory import encode_sensory_vector
 
 if _TORCH_AVAILABLE:
-    from src.transformer_core import XiaolaiTransformer
+    from src.transformer_core import FutureTransformer
 
 
 # =============================================================================
@@ -134,8 +134,10 @@ class NeuralAffectiveModel:
         context_max_len: int = 8192,
         transformer_layers: int = 6,
         transformer_heads: int = 8,
+        model_name: str = "模型",
     ) -> None:
         random.seed(seed)
+        self.model_name = model_name
         self.hidden_dim = hidden_dim
         self.lr = lr
         self.seed = seed
@@ -174,18 +176,18 @@ class NeuralAffectiveModel:
             self.b2 = np.zeros(self.vocab_size, dtype=np.float64)
             self.W_emotion_logits = np.random.randn(self.emotion_dim, self.vocab_size).astype(np.float64) * EMBED_SCALE
 
-    # 小来内置语言逻辑链：语义分组 + 多问法泛化（同一意图多种问法 → 同一答案）
+    # 内置语言逻辑链：语义分组 + 多问法泛化（同一意图多种问法 → 同一答案）
     # 第一视角：存在感链条，模型知道「我存在」
     _EXISTENCE_CHAINS: List[Tuple[str, str]] = [
         ("你存在吗", "我存在"),
         ("你在吗", "我在"),
         ("你知道你自己吗", "我知道我存在"),
     ]
-    _XIAOLAI_SEMANTIC_GROUPS: List[Tuple[str, str, List[str]]] = [
-        ("identity", "我是小来", [
-            "你是谁", "你是谁？", "你是谁啊", "你叫啥", "你叫什么", "你叫什么名字",
-            "你谁啊", "你哪位", "怎么称呼你", "how are you called", "what's your name",
-        ]),
+    _IDENTITY_PROMPTS: List[str] = [
+        "你是谁", "你是谁？", "你是谁啊", "你叫啥", "你叫什么", "你叫什么名字",
+        "你谁啊", "你哪位", "怎么称呼你", "how are you called", "what's your name",
+    ]
+    _SEMANTIC_GROUPS_BASE: List[Tuple[str, str, List[str]]] = [
         ("creator", "徐晗晞，我的缔造者", [
             "我是谁", "我是谁？", "你主人是谁", "谁创造了你", "谁造的", "创造者是谁",
         ]),
@@ -209,9 +211,15 @@ class NeuralAffectiveModel:
         ]),
     ]
 
-    def seed_xiaolai_logic(self, passes_per_step: int = 2, epochs: int = 1) -> int:
+    def _get_semantic_groups(self) -> List[Tuple[str, str, List[str]]]:
+        """返回语义组，identity 回答使用 self.model_name。"""
+        return [
+            ("identity", f"我是{self.model_name}", self._IDENTITY_PROMPTS),
+        ] + self._SEMANTIC_GROUPS_BASE
+
+    def seed_identity_logic(self, passes_per_step: int = 2, epochs: int = 1) -> int:
         """
-        预置小来的语言逻辑链到记忆并训练权重。
+        预置模型的语言逻辑链到记忆并训练权重。
         即学模式：高学习率、少轮次，一遍即记。
         Transformer 模式会先预注册所有 token，避免训练中动态扩展导致梯度不匹配。
         """
@@ -222,7 +230,7 @@ class NeuralAffectiveModel:
         all_chains: List[Tuple[str, List[str]]] = [
             (ans, [p]) for p, ans in self._EXISTENCE_CHAINS
         ]
-        for _intent, answer_str, prompt_list in self._XIAOLAI_SEMANTIC_GROUPS:
+        for _intent, answer_str, prompt_list in self._get_semantic_groups():
             all_chains.append((answer_str, prompt_list))
         if self._use_transformer:
             all_tokens = set()
@@ -395,7 +403,7 @@ class NeuralAffectiveModel:
 
     def _get_intent_bias_tokens(self, intent: str) -> List[int]:
         """意图 → 目标答案的 token ids，用于推理偏置（软引导，不覆盖人格）。"""
-        for ik, answer_str, _ in self._XIAOLAI_SEMANTIC_GROUPS:
+        for ik, answer_str, _ in self._get_semantic_groups():
             if ik == intent:
                 at = self.tokenize(answer_str)
                 for t in at:
@@ -449,7 +457,7 @@ class NeuralAffectiveModel:
     ) -> Dict[int, float]:
         """
         视角偏置：第一视角（存在感）必备 + 其他视角按概念自整理
-        第一视角：我/我的/小来 等，模型知道「我存在」
+        第一视角：我/我的 等，模型知道「我存在」
         """
         boosts: Dict[int, float] = {}
         pc = self.perspective_core
@@ -473,7 +481,7 @@ class NeuralAffectiveModel:
             return True
         out_set = set(t.lower() for t in tokens)
         if intent == "identity":
-            return "小" in out_set or "来" in out_set or "我" in out_set
+            return any(c in out_set for c in self.model_name) or "我" in out_set
         if intent == "creator":
             return "徐" in out_set or "晗" in out_set or "晞" in out_set or "缔" in out_set or "造" in out_set
         if intent in ("greeting", "greeting_how"):
@@ -512,7 +520,7 @@ class NeuralAffectiveModel:
     def _init_transformer(self) -> None:
         self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         torch.manual_seed(self.seed)
-        self._transformer = XiaolaiTransformer(
+        self._transformer = FutureTransformer(
             vocab_size=self.vocab_size,
             hidden_dim=self.hidden_dim,
             sensory_dim=self.sensory_dim,
@@ -1719,6 +1727,7 @@ class NeuralAffectiveModel:
                 "irrelevant_memory": self.irrelevant_memory,
                 "emotion_state": {"dim0": self.emotion_core.state.dim0, "dim1": self.emotion_core.state.dim1, "dim2": self.emotion_core.state.dim2},
                 "identity_drive": self.identity_drive,
+                "model_name": self.model_name,
                 "b2": self._b2.data.cpu().numpy().tolist(),
                 "hidden_dim": self.hidden_dim,
                 "sensory_dim": self.sensory_dim,
@@ -1740,6 +1749,7 @@ class NeuralAffectiveModel:
             "seed": self.seed,
             "sensory_dim": self.sensory_dim,
             "max_memory": self.max_memory,
+            "model_name": self.model_name,
             "token_to_id": self.token_to_id,
             "id_to_token": self.id_to_token,
             "E": self._np_to_list(self.E),
@@ -1830,6 +1840,7 @@ class NeuralAffectiveModel:
             dim0=e.get("dim0", 0), dim1=e.get("dim1", 0), dim2=e.get("dim2", 0)
         ))
         m.identity_drive = meta.get("identity_drive", [0.045, 0.045, 0.045])
+        m.model_name = meta.get("model_name", "模型")
         state = torch.load(torch_path, map_location=m._device)
         m._transformer.load_state_dict(state["transformer"])
         m._w2.load_state_dict(state["w2"])
@@ -1884,6 +1895,7 @@ class NeuralAffectiveModel:
             seed=int(data.get("seed", 42)),
             sensory_dim=int(data.get("sensory_dim", 8)),
             max_memory=int(data.get("max_memory", 0)),
+            model_name=str(data.get("model_name", "模型")),
         )
         m.token_to_id = {str(k): int(v) for k, v in data["token_to_id"].items()}
         m.id_to_token = [str(x) for x in data["id_to_token"]]

@@ -96,7 +96,7 @@ python3 main.py --backend numpy
 ### 2.3 交互式对话（默认）
 
 ```bash
-python3 main.py --model checkpoints/data.npz
+python3 main.py --model checkpoints/model.npz
 ```
 
 - 首次运行创建新模型，后续自动加载
@@ -119,7 +119,7 @@ python3 main.py --model checkpoints/data.npz
 ### 2.5 从头开始
 
 ```bash
-rm -rf checkpoints/xiaolai.npz checkpoints/xiaolai_meta.json
+rm -rf checkpoints/model.npz checkpoints/model_meta.json
 ./run_train.sh teacher
 ./run_train.sh correct   # 可选：教身份与纠错
 ```
@@ -132,7 +132,7 @@ rm -rf checkpoints/xiaolai.npz checkpoints/xiaolai_meta.json
 
 ```
 _run_cloze()            # 完形填空，含课程学习 + 学习率预热 + 拼接序列训练
-seed_xiaolai_logic()    # 身份/问候/因果逻辑链植入
+seed_identity_logic()   # 身份/问候/因果逻辑链植入
 _run_auto_validation()  # 每课 提问→答→判断→纠错→强化，未达标不停止
 ```
 
@@ -214,7 +214,8 @@ Future/
 
 | 参数                     | 类型    | 默认                     | 说明                |
 | ---------------------- | ----- | ---------------------- | ----------------- |
-| `--model`              | str   | `checkpoints/data.npz` | 模型路径              |
+| `--model`              | str   | `checkpoints/model.npz` | 模型路径              |
+| `--name`               | str   | `模型`                   | 自定义名称（如：小来）  |
 | `--backend`            | str   | numpy                  | `numpy` / `torch` |
 | `--context-max-len`    | int   | 8192                   | 上下文窗口（仅 torch）    |
 | `--transformer-layers` | int   | 6                      | Transformer 层数    |
@@ -273,6 +274,10 @@ python3 main.py --mode teacher --teacher-learning-passes 12 --teacher-replay-ste
 
 # correct 清空 memory（慎用）
 python3 main.py --mode correct --correct-purge-memory
+
+# 自定义模型名称（问「你是谁」时回答此名称）
+python3 main.py --name 小来
+./run_train.sh teacher  # 训练时自动使用模型中保存的名称
 
 # 循环训练（云端持续学习，Ctrl+C 安全停止）
 ./run_train.sh loop

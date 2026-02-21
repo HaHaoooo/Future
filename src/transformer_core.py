@@ -120,9 +120,9 @@ class TransformerBlock(nn.Module):
         return x
 
 
-class XiaolaiTransformer(nn.Module):
+class FutureTransformer(nn.Module):
     """
-    小来 Transformer 编码器：多层 causal decoder，输出最后一位置的隐态。
+    Future Transformer 编码器：多层 causal decoder，输出最后一位置的隐态。
     支持任意序列长度（受 context_max_len 裁剪）。
     """
 

@@ -14,7 +14,9 @@ def parse_args() -> AppConfig:
     parser = argparse.ArgumentParser(description="Future interactive learning system")
 
     # --- 通用 ---
-    parser.add_argument("--model", type=str, default="checkpoints/xiaolai.npz")
+    parser.add_argument("--model", type=str, default="checkpoints/model.npz")
+    parser.add_argument("--name", type=str, default="模型",
+                        help="模型名称（如：小来、Future），问「你是谁」时回答此名称")
     parser.add_argument("--backend", type=str, default="numpy", choices=["numpy", "torch"],
                         help="numpy=LSTM, torch=Transformer+大上下文")
     parser.add_argument("--hidden-dim", type=int, default=128, help="隐层维度")
@@ -61,6 +63,7 @@ def parse_args() -> AppConfig:
     args = parser.parse_args()
     return AppConfig(
         model_path=args.model,
+        model_name=args.name,
         backend=args.backend,
         hidden_dim=args.hidden_dim,
         context_max_len=args.context_max_len,

@@ -1,7 +1,7 @@
 services:
-  xiaolai-train:
+  future-train:
     build: .
-    container_name: xiaolai-train
+    container_name: future-train
     restart: unless-stopped
     volumes:
       - ./checkpoints:/app/checkpoints

@@ -11,7 +11,8 @@ class AppConfig:
     """应用配置，由 parse_args 填充。"""
 
     # --- 模型与训练 ---
-    model_path: str = "checkpoints/data.npz"
+    model_path: str = "checkpoints/model.npz"
+    model_name: str = "模型"  # 用户自定义名称，如「小来」「Future」
     backend: str = "numpy"  # numpy | torch
     hidden_dim: int = 128
     context_max_len: int = 8192  # 大上下文窗口（仅 torch 后端生效）

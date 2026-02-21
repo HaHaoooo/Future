@@ -4,7 +4,7 @@
 #       ./run_train.sh loop      # 循环训练（不断重复，Ctrl+C 停止）
 #       ./run_train.sh correct   # 人为主导纠错
 
-MODEL_PATH="checkpoints/xiaolai.npz"
+MODEL_PATH="checkpoints/model.npz"
 MODE="${1:-teacher}"
 
 case "$MODE" in
