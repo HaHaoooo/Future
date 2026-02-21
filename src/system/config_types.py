@@ -13,6 +13,7 @@ class AppConfig:
     # --- 模型与训练 ---
     model_path: str = "checkpoints/model.npz"
     model_name: str = "模型"  # 用户自定义名称，如「小来」「Future」
+    creator_name: str = "创造者"  # 用户自定义创造者名称
     backend: str = "numpy"  # numpy | torch
     hidden_dim: int = 128
     context_max_len: int = 8192  # 大上下文窗口（仅 torch 后端生效）

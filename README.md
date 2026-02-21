@@ -212,25 +212,26 @@ Future/
 ### 5.1 通用
 
 
-| 参数                     | 类型    | 默认                     | 说明                |
-| ---------------------- | ----- | ---------------------- | ----------------- |
+| 参数                     | 类型    | 默认                      | 说明                |
+| ---------------------- | ----- | ----------------------- | ----------------- |
 | `--model`              | str   | `checkpoints/model.npz` | 模型路径              |
-| `--name`               | str   | `模型`                   | 自定义名称（如：小来）  |
-| `--backend`            | str   | numpy                  | `numpy` / `torch` |
-| `--context-max-len`    | int   | 8192                   | 上下文窗口（仅 torch）    |
-| `--transformer-layers` | int   | 6                      | Transformer 层数    |
-| `--transformer-heads`  | int   | 8                      | 注意力头数             |
-| `--hidden-dim`         | int   | 128                    | 隐层维度              |
-| `--lr`                 | float | 0.04                   | 学习率               |
-| `--seed`               | int   | 42                     | 随机种子              |
-| `--max-len`            | int   | 0                      | 输出硬上限，0=不设限       |
-| `--temperature`        | float | 0.9                    | 采样温度              |
-| `--thought-trials`     | int   | 7                      | 内部候选思考次数          |
-| `--learning-passes`    | int   | 10                     | 每条反馈放大学习次数        |
-| `--replay-steps`       | int   | 320                    | 每轮反馈后经验回放步数       |
-| `--sensory-dim`        | int   | 8                      | 感官向量维度            |
-| `--sensor-file`        | str   | ""                     | 外部感官 JSON 路径      |
-| `--show-thought`       | flag  | False                  | 显示思考评分报告          |
+| `--name`               | str   | `模型`                    | 自定义模型名称（如：小来）     |
+| `--creator`            | str   | `创造者`                   | 自定义创造者名称          |
+| `--backend`            | str   | numpy                   | `numpy` / `torch` |
+| `--context-max-len`    | int   | 8192                    | 上下文窗口（仅 torch）    |
+| `--transformer-layers` | int   | 6                       | Transformer 层数    |
+| `--transformer-heads`  | int   | 8                       | 注意力头数             |
+| `--hidden-dim`         | int   | 128                     | 隐层维度              |
+| `--lr`                 | float | 0.04                    | 学习率               |
+| `--seed`               | int   | 42                      | 随机种子              |
+| `--max-len`            | int   | 0                       | 输出硬上限，0=不设限       |
+| `--temperature`        | float | 0.9                     | 采样温度              |
+| `--thought-trials`     | int   | 7                       | 内部候选思考次数          |
+| `--learning-passes`    | int   | 10                      | 每条反馈放大学习次数        |
+| `--replay-steps`       | int   | 320                     | 每轮反馈后经验回放步数       |
+| `--sensory-dim`        | int   | 8                       | 感官向量维度            |
+| `--sensor-file`        | str   | ""                      | 外部感官 JSON 路径      |
+| `--show-thought`       | flag  | False                   | 显示思考评分报告          |
 
 
 ### 5.2 模式
@@ -275,8 +276,8 @@ python3 main.py --mode teacher --teacher-learning-passes 12 --teacher-replay-ste
 # correct 清空 memory（慎用）
 python3 main.py --mode correct --correct-purge-memory
 
-# 自定义模型名称（问「你是谁」时回答此名称）
-python3 main.py --name 小来
+# 自定义模型名称和创造者名称
+python3 main.py --name 小来 --creator 随机名字
 ./run_train.sh teacher  # 训练时自动使用模型中保存的名称
 
 # 循环训练（云端持续学习，Ctrl+C 安全停止）

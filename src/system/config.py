@@ -17,6 +17,8 @@ def parse_args() -> AppConfig:
     parser.add_argument("--model", type=str, default="checkpoints/model.npz")
     parser.add_argument("--name", type=str, default="模型",
                         help="模型名称（如：小来、Future），问「你是谁」时回答此名称")
+    parser.add_argument("--creator", type=str, default="创造者",
+                        help="创造者名称，问「我是谁」/「谁创造了你」时回答此名称")
     parser.add_argument("--backend", type=str, default="numpy", choices=["numpy", "torch"],
                         help="numpy=LSTM, torch=Transformer+大上下文")
     parser.add_argument("--hidden-dim", type=int, default=128, help="隐层维度")
@@ -64,6 +66,7 @@ def parse_args() -> AppConfig:
     return AppConfig(
         model_path=args.model,
         model_name=args.name,
+        creator_name=args.creator,
         backend=args.backend,
         hidden_dim=args.hidden_dim,
         context_max_len=args.context_max_len,

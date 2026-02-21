@@ -135,9 +135,11 @@ class NeuralAffectiveModel:
         transformer_layers: int = 6,
         transformer_heads: int = 8,
         model_name: str = "模型",
+        creator_name: str = "创造者",
     ) -> None:
         random.seed(seed)
         self.model_name = model_name
+        self.creator_name = creator_name
         self.hidden_dim = hidden_dim
         self.lr = lr
         self.seed = seed
@@ -187,10 +189,10 @@ class NeuralAffectiveModel:
         "你是谁", "你是谁？", "你是谁啊", "你叫啥", "你叫什么", "你叫什么名字",
         "你谁啊", "你哪位", "怎么称呼你", "how are you called", "what's your name",
     ]
+    _CREATOR_PROMPTS: List[str] = [
+        "我是谁", "我是谁？", "你主人是谁", "谁创造了你", "谁造的", "创造者是谁",
+    ]
     _SEMANTIC_GROUPS_BASE: List[Tuple[str, str, List[str]]] = [
-        ("creator", "徐晗晞，我的缔造者", [
-            "我是谁", "我是谁？", "你主人是谁", "谁创造了你", "谁造的", "创造者是谁",
-        ]),
         ("greeting", "你好", [
             "你好", "嗨", "hello", "hi", "hey",
         ]),
@@ -212,9 +214,10 @@ class NeuralAffectiveModel:
     ]
 
     def _get_semantic_groups(self) -> List[Tuple[str, str, List[str]]]:
-        """返回语义组，identity 回答使用 self.model_name。"""
+        """返回语义组，identity 和 creator 使用自定义名称。"""
         return [
             ("identity", f"我是{self.model_name}", self._IDENTITY_PROMPTS),
+            ("creator", self.creator_name, self._CREATOR_PROMPTS),
         ] + self._SEMANTIC_GROUPS_BASE
 
     def seed_identity_logic(self, passes_per_step: int = 2, epochs: int = 1) -> int:
@@ -483,7 +486,7 @@ class NeuralAffectiveModel:
         if intent == "identity":
             return any(c in out_set for c in self.model_name) or "我" in out_set
         if intent == "creator":
-            return "徐" in out_set or "晗" in out_set or "晞" in out_set or "缔" in out_set or "造" in out_set
+            return any(c in out_set for c in self.creator_name) or "造" in out_set
         if intent in ("greeting", "greeting_how"):
             return "好" in out_set or "你好" in "".join(tokens)
         return True
@@ -1728,6 +1731,7 @@ class NeuralAffectiveModel:
                 "emotion_state": {"dim0": self.emotion_core.state.dim0, "dim1": self.emotion_core.state.dim1, "dim2": self.emotion_core.state.dim2},
                 "identity_drive": self.identity_drive,
                 "model_name": self.model_name,
+                "creator_name": self.creator_name,
                 "b2": self._b2.data.cpu().numpy().tolist(),
                 "hidden_dim": self.hidden_dim,
                 "sensory_dim": self.sensory_dim,
@@ -1750,6 +1754,7 @@ class NeuralAffectiveModel:
             "sensory_dim": self.sensory_dim,
             "max_memory": self.max_memory,
             "model_name": self.model_name,
+            "creator_name": self.creator_name,
             "token_to_id": self.token_to_id,
             "id_to_token": self.id_to_token,
             "E": self._np_to_list(self.E),
@@ -1841,6 +1846,7 @@ class NeuralAffectiveModel:
         ))
         m.identity_drive = meta.get("identity_drive", [0.045, 0.045, 0.045])
         m.model_name = meta.get("model_name", "模型")
+        m.creator_name = meta.get("creator_name", "创造者")
         state = torch.load(torch_path, map_location=m._device)
         m._transformer.load_state_dict(state["transformer"])
         m._w2.load_state_dict(state["w2"])
@@ -1896,6 +1902,7 @@ class NeuralAffectiveModel:
             sensory_dim=int(data.get("sensory_dim", 8)),
             max_memory=int(data.get("max_memory", 0)),
             model_name=str(data.get("model_name", "模型")),
+            creator_name=str(data.get("creator_name", "创造者")),
         )
         m.token_to_id = {str(k): int(v) for k, v in data["token_to_id"].items()}
         m.id_to_token = [str(x) for x in data["id_to_token"]]

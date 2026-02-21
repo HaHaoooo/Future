@@ -59,7 +59,7 @@ def _L(d: str, n: str, exp: str, q: str, a: str) -> TeachLesson:
 _FOUNDATION: List[TeachLesson] = [
     _L("奠基", "你好", "人说「你好」，简短回「你好」。", "你好", "你好"),
     _L("奠基", "你是谁", "人说「你是谁」，答「我是模型」。", "你是谁", "我是模型"),
-    _L("奠基", "我是谁", "人说「我是谁」，答创造者名字。", "我是谁", "徐晗晞"),
+    _L("奠基", "我是谁", "人说「我是谁」，答创造者名字。", "我是谁", "创造者"),
     _L("奠基", "你好吗", "问「你好吗」回「我很好」。", "你好吗", "我很好"),
     _L("奠基", "记得", "问「你记得我吗」回「记得」。", "你记得我吗", "记得"),
     _L("奠基", "因为所以", "因果句：因为 A 所以 B。", "用因为所以造句", "因为下雨所以带伞"),
@@ -94,8 +94,8 @@ _GRAMMAR: List[TeachLesson] = [
 
 # 完形填空基础语料：常识句、身份、逻辑链、对话结构
 _PRETRAIN: List[str] = [
-    "你好", "你好！", "我是模型", "我是模型。", "你是谁", "你是谁？", "徐晗晞", "徐晗晞是我的缔造者",
-    "我是谁", "我是谁？", "徐晗晞。", "你好吗", "你好吗？", "我很好", "我很好。", "你记得我吗", "记得",
+    "你好", "你好！", "我是模型", "我是模型。", "你是谁", "你是谁？", "创造者", "创造者",
+    "我是谁", "我是谁？", "创造者", "你好吗", "你好吗？", "我很好", "我很好。", "你记得我吗", "记得",
     "你存在吗", "我存在", "你在吗", "我在",
     "因为下雨", "因为下雨所以带伞", "因为下雨所以带伞。", "因为有云所以会下雨", "因为饿了所以吃饭",
     "如果下雨", "如果下雨就不出门", "如果下雨就不出门。", "如果明天晴天就去玩", "如果饿了就吃饭",
@@ -114,30 +114,33 @@ _PRETRAIN: List[str] = [
 # =============================================================================
 
 
-def _apply_name(text: str, name: str) -> str:
-    """将语料中的占位名「模型」替换为用户自定义名称。"""
-    if name == "模型":
-        return text
-    return text.replace("模型", name)
+def _apply_name(text: str, name: str, creator: str = "创造者") -> str:
+    """将语料中的占位名替换为用户自定义名称。"""
+    result = text
+    if name != "模型":
+        result = result.replace("模型", name)
+    if creator != "创造者":
+        result = result.replace("创造者", creator)
+    return result
 
 
-def _all_lessons(name: str = "模型") -> List[TeachLesson]:
+def _all_lessons(name: str = "模型", creator: str = "创造者") -> List[TeachLesson]:
     """返回全部验证课程：奠基 9 + 造句 20，身份用自定义名称。"""
     lessons = []
     for lesson in _FOUNDATION + _GRAMMAR[:20]:
         lessons.append(_L(
             lesson.domain, lesson.level_name,
-            _apply_name(lesson.explanation, name),
+            _apply_name(lesson.explanation, name, creator),
             lesson.question,
-            _apply_name(lesson.reference_answer, name),
+            _apply_name(lesson.reference_answer, name, creator),
         ))
     return lessons
 
 
-def _cloze_corpus(name: str = "模型") -> List[str]:
+def _cloze_corpus(name: str = "模型", creator: str = "创造者") -> List[str]:
     """完形填空语料：常识 + 全部课程，身份用自定义名称。"""
-    out = [_apply_name(s, name) for s in _PRETRAIN]
-    for lesson in _all_lessons(name):
+    out = [_apply_name(s, name, creator) for s in _PRETRAIN]
+    for lesson in _all_lessons(name, creator):
         out.append(lesson.explanation)
         out.append(f"{lesson.question} {lesson.reference_answer}")
     return out
@@ -658,13 +661,14 @@ def _run_one_cycle(
 def run_teacher_session(model: NeuralAffectiveModel, config: AppConfig) -> None:
     """完形填空预训练主流程。支持 --teacher-loop 循环训练，Ctrl+C 安全退出。"""
     name = model.model_name
+    creator = model.creator_name
     print("=" * 50)
-    print(f"  Future 老师 —— 完形填空预训练（名称：{name}）")
+    print(f"  Future 老师 —— 完形填空预训练（名称：{name}，创造者：{creator}）")
     if config.teacher_loop:
         print("  (循环模式：Ctrl+C 安全退出)")
     print("=" * 50)
-    corpus = _cloze_corpus(name)
-    lessons = _all_lessons(name)
+    corpus = _cloze_corpus(name, creator)
+    lessons = _all_lessons(name, creator)
 
     hanzi_chars = _load_hanzi_chars()
     hanzi_corpus: List[str] = []

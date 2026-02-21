@@ -25,6 +25,9 @@ def load_or_create_model(config: AppConfig) -> NeuralAffectiveModel:
         if config.model_name != "模型" and model.model_name != config.model_name:
             model.model_name = config.model_name
             print(f"[load] 模型名称已更新为「{config.model_name}」")
+        if config.creator_name != "创造者" and model.creator_name != config.creator_name:
+            model.creator_name = config.creator_name
+            print(f"[load] 创造者名称已更新为「{config.creator_name}」")
         enc = "Transformer" if model._use_transformer else "LSTM"
         ctx = f" (上下文 {model.context_max_len})" if model._use_transformer else ""
         print(f"[load] 已加载 {enc} 模型「{model.model_name}」: {config.model_path}{ctx}")
@@ -52,6 +55,7 @@ def load_or_create_model(config: AppConfig) -> NeuralAffectiveModel:
         transformer_layers=config.transformer_layers,
         transformer_heads=config.transformer_heads,
         model_name=config.model_name,
+        creator_name=config.creator_name,
     )
     steps = model.seed_identity_logic(passes_per_step=8)
     enc = "Transformer" if model._use_transformer else "LSTM"
